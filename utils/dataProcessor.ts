@@ -33,6 +33,19 @@ const detectBrand = (productName: string): string => {
 };
 
 /**
+ * Helper to detect if a product is a gift item
+ */
+const detectGift = (productName: string, amount: number): boolean => {
+  // 金額為 0 視為贈品
+  if (amount === 0) return true;
+
+  // 名稱包含贈品相關關鍵字
+  const giftKeywords = ['贈', '贈品', '禮', '附贈', '加贈', '送', '免費'];
+  const normalized = productName.toLowerCase();
+  return giftKeywords.some(keyword => normalized.includes(keyword));
+};
+
+/**
  * Heuristic to map dynamic column names to our standard SalesRecord format
  */
 export const normalizeData = (rawData: any[]): SalesRecord[] => {
@@ -79,7 +92,8 @@ export const normalizeData = (rawData: any[]): SalesRecord[] => {
       Quantity: qty,
       Amount: amount,
       Cost: costVal ? Number(costVal) : undefined,
-      Brand: detectBrand(productName)
+      Brand: detectBrand(productName),
+      isGift: detectGift(productName, amount)
     };
   }).filter(r => r.Quantity > 0 || r.Amount > 0); // Keep only positive sales for now
 };

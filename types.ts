@@ -8,6 +8,7 @@ export interface SalesRecord {
   Amount: number;
   Cost?: number; // Optional
   Brand: string; // New field derived from Product Name
+  isGift?: boolean; // 贈品標記
 }
 
 // 1. Sales Contribution (Pareto / ABC)

@@ -24,6 +24,7 @@ const AnalysisDashboard: React.FC<Props> = ({ data, rawRecords }) => {
   const [filterCategory, setFilterCategory] = useState<string>('All');
   const [filterBrand, setFilterBrand] = useState<string>('All');
   const [filterABC, setFilterABC] = useState<string>('All');
+  const [excludeGifts, setExcludeGifts] = useState<boolean>(true); // 預設排除贈品
 
   // Extract Filter Options (from rawRecords for completeness)
   const categories = useMemo(() => ['All', ...Array.from(new Set(rawRecords.map(r => r.Category))).sort()], [rawRecords]);
@@ -39,6 +40,11 @@ const AnalysisDashboard: React.FC<Props> = ({ data, rawRecords }) => {
     }
     if (filterBrand !== 'All') {
       filteredRecords = filteredRecords.filter(r => r.Brand === filterBrand);
+    }
+
+    // 排除贈品
+    if (excludeGifts) {
+      filteredRecords = filteredRecords.filter(r => !r.isGift);
     }
 
     // ABC filtering is tricky because ABC is calculated based on cumulative performance. 
@@ -73,7 +79,7 @@ const AnalysisDashboard: React.FC<Props> = ({ data, rawRecords }) => {
       dailyTrend,
       decisions
     };
-  }, [rawRecords, filterCategory, filterBrand, filterABC, data.decisions, data.performanceMetrics]);
+  }, [rawRecords, filterCategory, filterBrand, filterABC, excludeGifts, data.decisions, data.performanceMetrics]);
 
 
   // Helpers
@@ -173,6 +179,16 @@ const AnalysisDashboard: React.FC<Props> = ({ data, rawRecords }) => {
             {abcClasses.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
+        {/* 贈品排除開關 */}
+        <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={excludeGifts}
+            onChange={e => setExcludeGifts(e.target.checked)}
+            className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <span className="text-sm text-gray-700">排除贈品</span>
+        </label>
       </div>
 
       {/* 1. High-Level Metrics Cards */}
@@ -456,8 +472,8 @@ const AnalysisDashboard: React.FC<Props> = ({ data, rawRecords }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {data.slowMovingAlerts.slice(0, 6).map((alert, idx) => (
                     <div key={idx} className={`p-4 rounded-lg border ${alert.riskLevel === 'HIGH' ? 'bg-red-100 border-red-300' :
-                        alert.riskLevel === 'MEDIUM' ? 'bg-amber-100 border-amber-300' :
-                          'bg-gray-100 border-gray-300'
+                      alert.riskLevel === 'MEDIUM' ? 'bg-amber-100 border-amber-300' :
+                        'bg-gray-100 border-gray-300'
                       }`}>
                       <div className="font-bold text-gray-800 truncate" title={alert.productName}>{alert.productName}</div>
                       <div className="text-sm text-gray-600 mt-1">
@@ -633,11 +649,13 @@ const AnalysisDashboard: React.FC<Props> = ({ data, rawRecords }) => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-500 font-semibold tracking-wider">
-                    <th className="px-6 py-4">決策</th>
-                    <th className="px-6 py-4">商品名稱</th>
-                    <th className="px-6 py-4">分類</th>
-                    <th className="px-6 py-4">生命週期</th>
-                    <th className="px-6 py-4 w-1/3">理由與行動</th>
+                    <th className="px-4 py-4">決策</th>
+                    <th className="px-4 py-4">商品名稱</th>
+                    <th className="px-4 py-4">分類</th>
+                    <th className="px-4 py-4 text-right">銷售數量</th>
+                    <th className="px-4 py-4 text-right">銷售金額</th>
+                    <th className="px-4 py-4">生命週期</th>
+                    <th className="px-4 py-4">理由與行動</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
@@ -649,24 +667,33 @@ const AnalysisDashboard: React.FC<Props> = ({ data, rawRecords }) => {
                     if (item.tag === DecisionTag.DISPLAY_ONLY) { tagStyle = 'bg-purple-100 text-purple-800 border-purple-200'; Icon = Archive; }
                     if (item.tag === DecisionTag.WATCH_LIST) { tagStyle = 'bg-amber-100 text-amber-800 border-amber-200'; Icon = Eye; }
 
+                    // 取得商品的銷量/金額數據
+                    const metric = filteredData.performanceMetrics.find(m => m.productName === item.productName);
+
                     return (
                       <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4">
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-bold ${tagStyle}`}>
                             <Icon className="w-3 h-3" />
                             {item.tag.split(' ')[0]}
                           </span>
                         </td>
-                        <td className="px-6 py-4 font-bold text-gray-800">
+                        <td className="px-4 py-4 font-bold text-gray-800 max-w-[200px] truncate" title={item.productName}>
                           {item.productName}
                         </td>
-                        <td className="px-6 py-4 text-gray-500">{item.category}</td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4 text-gray-500">{item.category}</td>
+                        <td className="px-4 py-4 text-right font-medium text-blue-600">
+                          {metric ? fmtNum(metric.totalQty) : '-'}
+                        </td>
+                        <td className="px-4 py-4 text-right font-medium text-emerald-600">
+                          {metric ? fmt(metric.totalAmount) : '-'}
+                        </td>
+                        <td className="px-4 py-4">
                           <span className={`px-2 py-0.5 rounded text-xs border ${getLifecycleColor(item.lifecycle as LifecycleStage)}`}>
                             {item.lifecycle}
                           </span>
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-4">
                           <div className="mb-1 text-gray-800 font-medium">{item.action}</div>
                           <div className="text-gray-500 text-xs leading-relaxed">{item.reason}</div>
                         </td>

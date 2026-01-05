@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { LayoutDashboard, AlertCircle, Database } from 'lucide-react';
 import InputSection from './components/InputSection';
 import AnalysisDashboard from './components/AnalysisDashboard';
+import AIChatPanel from './components/AIChatPanel';
 import { SalesRecord, AnalysisResult } from './types';
 import {
   analyzePerformance, analyzeSeasonality, analyzePriceBands, analyzeBrands, analyzeDailyTrend,
@@ -144,6 +145,11 @@ const App: React.FC = () => {
             </div>
             <AnalysisDashboard data={analysisResult} rawRecords={rawRecords} />
           </div>
+        )}
+
+        {/* AI 對話浮動視窗 */}
+        {analysisResult && (
+          <AIChatPanel rawRecords={rawRecords} analysisResult={analysisResult} />
         )}
 
       </main>
