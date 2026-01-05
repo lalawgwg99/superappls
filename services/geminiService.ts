@@ -52,7 +52,7 @@ export const generateDecisionMatrix = async (
 
   // 加入超時控制
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("AI 分析超時，請稍後再試 (30秒)")), 30000)
+    setTimeout(() => reject(new Error("AI 分析超時，請稍後再試 (300秒)")), 300000)
   );
 
   const apiPromise = ai.models.generateContent({
