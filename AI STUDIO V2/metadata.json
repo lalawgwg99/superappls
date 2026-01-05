@@ -1,0 +1,5 @@
+{
+  "name": "Taiwan Appliance Inventory Forecaster",
+  "description": "A smart inventory planning tool for supply chain managers in Taiwan, using Gemini to analyze historical sales data and weather forecasts to predict stocking needs.",
+  "requestFramePermissions": []
+}
