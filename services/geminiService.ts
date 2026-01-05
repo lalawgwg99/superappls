@@ -8,19 +8,64 @@ export const generateDecisionMatrix = async (
   seasonalityData: SeasonalityData[]
 ): Promise<{ decisions: ProductDecision[]; overallSummary: string }> => {
 
-  // 定義模型優先順序 (Fallback Strategy)
-  // 1. Gemini 2.0 Flash Exp (對應 "Gemini 3 Flash" 預覽體驗)
-  // 2. Gemini 1.5 Flash (各種版本號，確保相容性)
-  // 3. Gemini 1.5 Pro (最後防線)
+  // 1. 準備數據採樣 (Data Sampling)
+  // 限制 Top 30 A類 + Top 5 B類 + Top 5 C類，避免 token 溢出
+  const aClass = performanceData.filter(p => p.cumulativeShare <= 80).slice(0, 30);
+  const bClass = performanceData.filter(p => p.cumulativeShare > 80 && p.cumulativeShare <= 95).slice(0, 5);
+  const cClass = performanceData.filter(p => p.cumulativeShare > 95).slice(-5);
+  const sampleData = [...aClass, ...bClass, ...cClass];
+
+  // 2. 建構 Prompt (Prompt Engineering for JSON)
+  // 強制要求純 JSON 字串，不使用 Markdown，避開 SDK schema bug
+  const prompt = `
+    你是一個專業的「零售供應鏈決策系統」。請根據以下數據進行庫存與採購分析。
+
+    【分析邏輯】
+    1. **ABC 分析**：A類商品(Top 80%營收)不可缺貨；C類商品若低週轉應考慮淘汰。
+    2. **生命週期**：識別新品(近期頻率高)、成熟品(穩定)、衰退品(量減)。
+    3. **陳列策略**：高單價+低週轉 = 形象陳列；低單價+高週轉 = 堆箱陳列。
+
+    【輸入數據】
+    1. 商品表現 (Top 40 items):
+    ${JSON.stringify(sampleData.map(i => ({
+    Product: i.productName,
+    Category: i.category,
+    ABC: i.abcClass,
+    AvgPrice: i.averagePrice,
+    TotalQty: i.totalQty,
+    Freq: i.salesFrequency
+  })), null, 2)}
+
+    2. 季節性趨勢:
+    ${JSON.stringify(seasonalityData, null, 2)}
+
+    【輸出要求】
+    請直接回傳一個 JSON 物件，不要包含 Markdown 標記 (如 \`\`\`json)。格式如下：
+    {
+      "overallSummary": "高階經理人摘要 (Executive Summary)，包含本季重點策略、庫存健康度評估。",
+      "decisions": [
+        {
+          "productName": "商品名稱",
+          "category": "類別",
+          "tag": "${DecisionTag.MAIN_STOCK} | ${DecisionTag.DISPLAY_ONLY} | ${DecisionTag.STOP_ORDER} | ${DecisionTag.WATCH_LIST}",
+          "lifecycle": "${LifecycleStage.NEW} | ${LifecycleStage.GROWTH} | ${LifecycleStage.MATURE} | ${LifecycleStage.DECLINE}",
+          "reason": "決策理由",
+          "action": "具體行動"
+        }
+      ]
+    }
+  `;
+
+  // 3. 定義模型優先順序 (Fallback Strategy)
+  // 優先使用 Gemini 2.0 Flash Exp ("Gemini 3 Flash")
   const models = [
     "gemini-2.0-flash-exp",
     "gemini-1.5-flash",
-    "gemini-1.5-flash-001",
     "gemini-1.5-flash-002",
-    "gemini-1.5-flash-latest",
     "gemini-1.5-pro"
   ];
 
+  // 4. 執行 AI 呼叫 (With Fallback & Timeout)
   const callGeminiWithFallback = async (currentPrompt: string): Promise<any> => {
     let lastError = null;
 
@@ -28,91 +73,64 @@ export const generateDecisionMatrix = async (
       try {
         console.log(`[AI] Trying model: ${model}...`);
 
-        // 加入超時控制 (效能優化後延長至 180 秒確保完成)
+        // 超時控制 (180秒)
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error(`AI 分析時間較長 (${model})，請稍候 (180秒)`)), 180000)
         );
 
+        // 核心：不使用 config.responseSchema，避免 "Unsupported part type: function"
         const apiPromise = ai.models.generateContent({
           model: model,
           contents: currentPrompt,
           config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                overallSummary: { type: Type.STRING, description: "高階經理人摘要 (Executive Summary)，包含本季重點策略、庫存健康度評估。" },
-                decisions: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      productName: { type: Type.STRING },
-                      category: { type: Type.STRING },
-                      tag: {
-                        type: Type.STRING,
-                        enum: [
-                          DecisionTag.MAIN_STOCK,
-                          DecisionTag.DISPLAY_ONLY,
-                          DecisionTag.STOP_ORDER,
-                          DecisionTag.WATCH_LIST
-                        ]
-                      },
-                      lifecycle: {
-                        type: Type.STRING,
-                        enum: [
-                          LifecycleStage.NEW,
-                          LifecycleStage.GROWTH,
-                          LifecycleStage.MATURE,
-                          LifecycleStage.DECLINE
-                        ]
-                      },
-                      reason: { type: Type.STRING, description: "決策理由 (例如: A類核心商品，週轉穩定)" },
-                      action: { type: Type.STRING, description: "具體行動 (例如: 建立2週安全庫存)" }
-                    },
-                    required: ["productName", "category", "tag", "lifecycle", "reason", "action"]
-                  }
-                }
-              },
-              required: ["overallSummary", "decisions"]
-            }
+            responseMimeType: "application/json"
           }
         });
 
-        const response = await Promise.race([apiPromise, timeoutPromise]);
+        const response: any = await Promise.race([apiPromise, timeoutPromise]);
         return response;
 
       } catch (err: any) {
         console.warn(`[AI] Model ${model} failed:`, err);
         lastError = err;
-        // 如果是 404 (Model Not Found) 或 5xx 錯誤，繼續嘗試下一個模型
-        // 否則 (例如 API Key 錯誤) 可能直接拋出
-        continue;
+        continue; // 嘗試下一個模型
       }
     }
     throw lastError || new Error("All AI models failed.");
   };
 
   const response = await callGeminiWithFallback(prompt);
+  let text = response.text(); // SDK v1beta returns text() method or text property? Check docs. Usually .text() or .text
 
-  const text = response.text;
+  if (!text && response.candidates && response.candidates.length > 0) {
+    // Fallback for getting text content
+    const parts = response.candidates[0].content.parts;
+    if (parts.length > 0 && parts[0].text) {
+      text = parts[0].text;
+    }
+  }
+
   if (!text) throw new Error("AI 分析回傳空結果，請檢查網路連線。");
 
-  // JSON 解析錯誤處理
+  // 5. 結果清理與解析
+  // 移除可能存在的 Markdown Code Block
+  const cleanedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
   try {
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(cleanedText);
 
-    // 驗證回應結構
+    // 簡單驗證
     if (!parsed.decisions || !Array.isArray(parsed.decisions)) {
-      throw new Error("AI 回應格式異常：缺少 decisions 陣列");
-    }
-    if (!parsed.overallSummary || typeof parsed.overallSummary !== 'string') {
-      parsed.overallSummary = "AI 未提供策略摘要";
+      throw new Error("回應缺少 decisions 陣列");
     }
 
-    return parsed;
-  } catch (parseError: any) {
-    console.error("JSON Parse Error:", parseError, "Raw:", text?.substring(0, 500));
-    throw new Error(`AI 回應解析失敗: ${parseError.message}`);
+    return {
+      overallSummary: parsed.overallSummary || "AI 未提供摘要",
+      decisions: parsed.decisions
+    };
+  } catch (e: any) {
+    console.error("JSON Parse Error:", e);
+    console.error("Raw Text:", text);
+    throw new Error("AI 回應無法解析為 JSON，請重試。");
   }
 };
