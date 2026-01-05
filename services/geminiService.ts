@@ -57,12 +57,10 @@ export const generateDecisionMatrix = async (
   `;
 
   // 3. 定義模型優先順序 (Fallback Strategy)
-  // 優先使用 Gemini 2.0 Flash Exp ("Gemini 3 Flash")
+  // [用戶強制要求]：Gemini 3 Pro 等級 (使用 1.5 Pro)
   const models = [
-    "gemini-2.0-flash-exp",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-002",
-    "gemini-1.5-pro"
+    "gemini-1.5-pro",
+    "gemini-1.5-flash"
   ];
 
   // 4. 執行 AI 呼叫 (With Fallback & Timeout)
@@ -73,9 +71,9 @@ export const generateDecisionMatrix = async (
       try {
         console.log(`[AI] Trying model: ${model}...`);
 
-        // 超時控制 (180秒)
+        // 超時控制 (300秒 / 5分鐘) - 應應用戶要求
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`AI 分析時間較長 (${model})，請稍候 (180秒)`)), 180000)
+          setTimeout(() => reject(new Error(`AI 分析時間較長 (${model})，請稍候 (300秒)`)), 300000)
         );
 
         // 核心：不使用 config.responseSchema，避免 "Unsupported part type: function"
@@ -100,12 +98,17 @@ export const generateDecisionMatrix = async (
   };
 
   const response = await callGeminiWithFallback(prompt);
-  let text = response.text(); // SDK v1beta returns text() method or text property? Check docs. Usually .text() or .text
 
-  if (!text && response.candidates && response.candidates.length > 0) {
+  // [Fix] response.text() vs response.text property access
+  let text = "";
+  if (typeof response.text === 'string') {
+    text = response.text;
+  } else if (typeof response.text === 'function') {
+    text = response.text();
+  } else if (response.candidates && response.candidates.length > 0) {
     // Fallback for getting text content
     const parts = response.candidates[0].content.parts;
-    if (parts.length > 0 && parts[0].text) {
+    if (parts && parts.length > 0 && parts[0].text) {
       text = parts[0].text;
     }
   }
