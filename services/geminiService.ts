@@ -40,7 +40,9 @@ export const generateDecisionMatrix = async (
     ${JSON.stringify(seasonalityData, null, 2)}
 
     【輸出要求】
-    請直接回傳一個 JSON 物件，不要包含 Markdown 標記 (如 \`\`\`json)。格式如下：
+    1. 請直接回傳一個 JSON 物件，不要包含 Markdown 標記 (如 \`\`\`json)。
+    2. **所有內容 (overallSummary, reason, action) 必須使用「繁體中文」(Traditional Chinese) 撰寫。**
+    格式如下：
     {
       "overallSummary": "高階經理人摘要 (Executive Summary)，包含本季重點策略、庫存健康度評估。",
       "decisions": [
@@ -49,8 +51,8 @@ export const generateDecisionMatrix = async (
           "category": "類別",
           "tag": "${DecisionTag.MAIN_STOCK} | ${DecisionTag.DISPLAY_ONLY} | ${DecisionTag.STOP_ORDER} | ${DecisionTag.WATCH_LIST}",
           "lifecycle": "${LifecycleStage.NEW} | ${LifecycleStage.GROWTH} | ${LifecycleStage.MATURE} | ${LifecycleStage.DECLINE}",
-          "reason": "決策理由",
-          "action": "具體行動"
+          "reason": "決策理由 (繁體中文)",
+          "action": "具體行動 (繁體中文)"
         }
       ]
     }
@@ -59,9 +61,8 @@ export const generateDecisionMatrix = async (
   // 3. 定義模型優先順序 (Fallback Strategy)
   // [用戶強制要求]：Gemini 3 Pro 等級 (使用 1.5 Pro)
   const models = [
-    "gemini-1.5-pro",
-    "gemini-1.5-flash"
-  ];
+    "gemini-1-flash"
+3.0  ];
 
   // 4. 執行 AI 呼叫 (With Fallback & Timeout)
   const callGeminiWithFallback = async (currentPrompt: string): Promise<any> => {
