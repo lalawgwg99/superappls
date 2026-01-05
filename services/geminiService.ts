@@ -50,9 +50,9 @@ export const generateDecisionMatrix = async (
     若為 A 類，請建議「${DecisionTag.MAIN_STOCK}」。
   `;
 
-  // 加入超時控制
+  // 加入超時控制 (Cloudflare 環境延長至 60 秒)
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("AI 分析超時，請稍後再試 (30秒)")), 30000)
+    setTimeout(() => reject(new Error("AI 分析超時，請稍後再試 (60秒)")), 60000)
   );
 
   const apiPromise = ai.models.generateContent({
