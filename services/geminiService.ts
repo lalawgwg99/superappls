@@ -7,16 +7,21 @@ export const generateDecisionMatrix = async (
   performanceData: ProductPerformance[],
   seasonalityData: SeasonalityData[]
 ): Promise<{ decisions: ProductDecision[]; overallSummary: string }> => {
+  // Use Gemini 3 Pro for advanced reasoning (replacing 2.5 Pro which is not available)
+  const modelId = "gemini-3-pro-preview";
 
-  // 1. 準備數據採樣 (Data Sampling)
-  // 限制 Top 30 A類 + Top 5 B類 + Top 5 C類，避免 token 溢出
-  const aClass = performanceData.filter(p => p.cumulativeShare <= 80).slice(0, 30);
+  // Context Optimization: 
+  // We cannot send thousands of rows. We send a representative sample:
+  // 1. All 'A' Class items (Core)
+  // 2. Top 5 'B' Class items
+  // 3. Bottom 5 'C' Class items (candidates for deletion)
+
+  const aClass = performanceData.filter(p => p.cumulativeShare <= 80);
   const bClass = performanceData.filter(p => p.cumulativeShare > 80 && p.cumulativeShare <= 95).slice(0, 5);
   const cClass = performanceData.filter(p => p.cumulativeShare > 95).slice(-5);
+
   const sampleData = [...aClass, ...bClass, ...cClass];
 
-  // 2. 建構 Prompt (Prompt Engineering for JSON)
-  // 強制要求純 JSON 字串，不使用 Markdown，避開 SDK schema bug
   const prompt = `
     你是一個專業的「零售供應鏈決策系統」。請根據以下數據進行庫存與採購分析。
 
@@ -26,7 +31,7 @@ export const generateDecisionMatrix = async (
     3. **陳列策略**：高單價+低週轉 = 形象陳列；低單價+高週轉 = 堆箱陳列。
 
     【輸入數據】
-    1. 商品表現 (Top 40 items):
+    1. 商品表現 (Product Performance):
     ${JSON.stringify(sampleData.map(i => ({
     Product: i.productName,
     Category: i.category,
@@ -36,106 +41,86 @@ export const generateDecisionMatrix = async (
     Freq: i.salesFrequency
   })), null, 2)}
 
-    2. 季節性趨勢:
+    2. 季節性趨勢 (Seasonality):
     ${JSON.stringify(seasonalityData, null, 2)}
 
     【輸出要求】
-    1. 請直接回傳一個 JSON 物件，不要包含 Markdown 標記 (如 \`\`\`json)。
-    2. **所有內容 (overallSummary, reason, action) 必須使用「繁體中文」(Traditional Chinese) 撰寫。**
-    格式如下：
-    {
-      "overallSummary": "高階經理人摘要 (Executive Summary)，包含本季重點策略、庫存健康度評估。",
-      "decisions": [
-        {
-          "productName": "商品名稱",
-          "category": "類別",
-          "tag": "${DecisionTag.MAIN_STOCK} | ${DecisionTag.DISPLAY_ONLY} | ${DecisionTag.STOP_ORDER} | ${DecisionTag.WATCH_LIST}",
-          "lifecycle": "${LifecycleStage.NEW} | ${LifecycleStage.GROWTH} | ${LifecycleStage.MATURE} | ${LifecycleStage.DECLINE}",
-          "reason": "決策理由 (繁體中文)",
-          "action": "具體行動 (繁體中文)"
-        }
-      ]
-    }
+    請針對上述每一個商品提供決策建議。
+    特別注意：若為 C 類且頻率低，請大膽建議「${DecisionTag.STOP_ORDER}」。
+    若為 A 類，請建議「${DecisionTag.MAIN_STOCK}」。
   `;
 
-  // 3. 定義模型優先順序 (Fallback Strategy)
-  // [系統修復]：還原為穩定版以修復 404 (Gemini 3.0 未在當前區域/API 啟用)
-  const models = [
-    "gemini-1.5-pro",
-    "gemini-1.5-flash"
-  ];
+  // 加入超時控制
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("AI 分析超時，請稍後再試 (30秒)")), 30000)
+  );
 
-  // 4. 執行 AI 呼叫 (With Fallback & Timeout)
-  const callGeminiWithFallback = async (currentPrompt: string): Promise<any> => {
-    let lastError = null;
-
-    for (const model of models) {
-      try {
-        console.log(`[AI] Trying model: ${model}...`);
-
-        // 超時控制 (300秒 / 5分鐘) - 應應用戶要求
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`AI 分析時間較長 (${model})，請稍候 (300秒)`)), 300000)
-        );
-
-        // 核心：不使用 config.responseSchema，避免 "Unsupported part type: function"
-        const apiPromise = ai.models.generateContent({
-          model: model,
-          contents: currentPrompt,
-          config: {
-            responseMimeType: "application/json"
+  const apiPromise = ai.models.generateContent({
+    model: modelId,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          overallSummary: { type: Type.STRING, description: "高階經理人摘要 (Executive Summary)，包含本季重點策略、庫存健康度評估。" },
+          decisions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                productName: { type: Type.STRING },
+                category: { type: Type.STRING },
+                tag: {
+                  type: Type.STRING,
+                  enum: [
+                    DecisionTag.MAIN_STOCK,
+                    DecisionTag.DISPLAY_ONLY,
+                    DecisionTag.STOP_ORDER,
+                    DecisionTag.WATCH_LIST
+                  ]
+                },
+                lifecycle: {
+                  type: Type.STRING,
+                  enum: [
+                    LifecycleStage.NEW,
+                    LifecycleStage.GROWTH,
+                    LifecycleStage.MATURE,
+                    LifecycleStage.DECLINE
+                  ]
+                },
+                reason: { type: Type.STRING, description: "決策理由 (例如: A類核心商品，週轉穩定)" },
+                action: { type: Type.STRING, description: "具體行動 (例如: 建立2週安全庫存)" }
+              },
+              required: ["productName", "category", "tag", "lifecycle", "reason", "action"]
+            }
           }
-        });
-
-        const response: any = await Promise.race([apiPromise, timeoutPromise]);
-        return response;
-
-      } catch (err: any) {
-        console.warn(`[AI] Model ${model} failed:`, err);
-        lastError = err;
-        continue; // 嘗試下一個模型
+        },
+        required: ["overallSummary", "decisions"]
       }
     }
-    throw lastError || new Error("All AI models failed.");
-  };
+  });
 
-  const response = await callGeminiWithFallback(prompt);
+  const response = await Promise.race([apiPromise, timeoutPromise]);
 
-  // [Fix] response.text() vs response.text property access
-  let text = "";
-  if (typeof response.text === 'string') {
-    text = response.text;
-  } else if (typeof response.text === 'function') {
-    text = response.text();
-  } else if (response.candidates && response.candidates.length > 0) {
-    // Fallback for getting text content
-    const parts = response.candidates[0].content.parts;
-    if (parts && parts.length > 0 && parts[0].text) {
-      text = parts[0].text;
-    }
-  }
-
+  const text = response.text;
   if (!text) throw new Error("AI 分析回傳空結果，請檢查網路連線。");
 
-  // 5. 結果清理與解析
-  // 移除可能存在的 Markdown Code Block
-  const cleanedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
+  // JSON 解析錯誤處理
   try {
-    const parsed = JSON.parse(cleanedText);
+    const parsed = JSON.parse(text);
 
-    // 簡單驗證
+    // 驗證回應結構
     if (!parsed.decisions || !Array.isArray(parsed.decisions)) {
-      throw new Error("回應缺少 decisions 陣列");
+      throw new Error("AI 回應格式異常：缺少 decisions 陣列");
+    }
+    if (!parsed.overallSummary || typeof parsed.overallSummary !== 'string') {
+      parsed.overallSummary = "AI 未提供策略摘要";
     }
 
-    return {
-      overallSummary: parsed.overallSummary || "AI 未提供摘要",
-      decisions: parsed.decisions
-    };
-  } catch (e: any) {
-    console.error("JSON Parse Error:", e);
-    console.error("Raw Text:", text);
-    throw new Error("AI 回應無法解析為 JSON，請重試。");
+    return parsed;
+  } catch (parseError: any) {
+    console.error("JSON Parse Error:", parseError, "Raw:", text?.substring(0, 500));
+    throw new Error(`AI 回應解析失敗: ${parseError.message}`);
   }
 };
