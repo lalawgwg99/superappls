@@ -7,8 +7,9 @@ export const generateDecisionMatrix = async (
   performanceData: ProductPerformance[],
   seasonalityData: SeasonalityData[]
 ): Promise<{ decisions: ProductDecision[]; overallSummary: string }> => {
-  // Use Gemini 1.5 Flash for speed optimization (User request)
-  const modelId = "gemini-1.5-flash";
+  // 🚀 Dual Model Strategy: 使用 Gemini 2.0 Flash 獲得極致速度與推論能力
+  // 此模型比 1.5 Pro 快 5-10 倍，且具備更強的邏輯能力
+  const modelId = "gemini-2.0-flash-exp";
 
   // Context Optimization: 
   // We cannot send thousands of rows. We send a representative sample:
