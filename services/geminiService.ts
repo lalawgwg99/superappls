@@ -7,16 +7,16 @@ export const generateDecisionMatrix = async (
   performanceData: ProductPerformance[],
   seasonalityData: SeasonalityData[]
 ): Promise<{ decisions: ProductDecision[]; overallSummary: string }> => {
-  // Use Gemini 3 Pro for advanced reasoning (replacing 2.5 Pro which is not available)
-  const modelId = "gemini-3-pro-preview";
+  // Use Gemini 1.5 Flash for speed optimization (User request)
+  const modelId = "gemini-1.5-flash";
 
   // Context Optimization: 
   // We cannot send thousands of rows. We send a representative sample:
-  // 1. All 'A' Class items (Core)
+  // 1. Top 30 'A' Class items (Core Revenue Drivers) - Capped to prevent timeout
   // 2. Top 5 'B' Class items
   // 3. Bottom 5 'C' Class items (candidates for deletion)
 
-  const aClass = performanceData.filter(p => p.cumulativeShare <= 80);
+  const aClass = performanceData.filter(p => p.cumulativeShare <= 80).slice(0, 30);
   const bClass = performanceData.filter(p => p.cumulativeShare > 80 && p.cumulativeShare <= 95).slice(0, 5);
   const cClass = performanceData.filter(p => p.cumulativeShare > 95).slice(-5);
 
@@ -31,7 +31,7 @@ export const generateDecisionMatrix = async (
     3. **陳列策略**：高單價+低週轉 = 形象陳列；低單價+高週轉 = 堆箱陳列。
 
     【輸入數據】
-    1. 商品表現 (Product Performance):
+    1. 商品表現 (Product Performance - Top 40 items):
     ${JSON.stringify(sampleData.map(i => ({
     Product: i.productName,
     Category: i.category,
@@ -50,9 +50,9 @@ export const generateDecisionMatrix = async (
     若為 A 類，請建議「${DecisionTag.MAIN_STOCK}」。
   `;
 
-  // 加入超時控制 (Cloudflare 環境延長至 60 秒)
+  // 加入超時控制 (效能優化後延長至 180 秒確保完成)
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("AI 分析超時，請稍後再試 (60秒)")), 60000)
+    setTimeout(() => reject(new Error("AI 分析時間較長，請稍候 (180秒)")), 180000)
   );
 
   const apiPromise = ai.models.generateContent({
