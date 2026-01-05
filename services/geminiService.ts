@@ -59,9 +59,10 @@ export const generateDecisionMatrix = async (
   `;
 
   // 3. 定義模型優先順序 (Fallback Strategy)
-  // [用戶強制要求]：Gemini 3 Flash
+  // [用戶強制要求]：Gemini 3 Pro 等級 (使用 1.5 Pro)
   const models = [
-    "gemini-3-flash"
+    "gemini-1.5-pro",
+    "gemini-1.5-flash"
   ];
 
   // 4. 執行 AI 呼叫 (With Fallback & Timeout)
